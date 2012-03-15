@@ -23,43 +23,62 @@
 #(INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
 #SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-import asyncore
-import socket
-import sys
 
-class PsimWorker(asyncore.dispatcher):
 
-	def __init__(self, host, port):
-		asyncore.dispatcher.__init__(self)
-		print "Creating new worker on port: ", port
-		self.port = port
-		
-		self.create_socket(socket.AF_INET, socket.SOCK_STREAM)
-		self.set_reuse_addr()
-		self.bind((host, port))
-		self.listen(5)
+import os, string, cPickle, time, math
+import asyncore, socket
 
-	def handle_accept(self):
-		pair = self.accept()
-		if pair is None:
-			pass
+
+def SWITCH(i,j):
+	return True
+
+
+class RPSim(asyncore.dispatcher):
+	def log(self,message):
+		"""
+		logs the message into self._logfile
+		"""
+		if self.logfile!=None:
+			self.logfile.write(message)
 		else:
-			sock, addr = pair
-			print 'Incoming connection from %s' % repr(addr)
-			self.rank = int(self.recv(4))
-			print 'I am rank: ', self.rank
+			print message
 
-			programSize = int(self.recv(4))
-			print 'we have a program size of: ', programSize, ' bytes'
-			
-			self.program = self.recv(programSize)
-			print 'Program Received:'
-			print self.program
-	
+	def __init__(self, rank, mappingFile, topology=SWITCH, logfilename=None):
+	    asyncore.dispatcher.__init__(self)
+		self.logfile = logfilename and open(logfilename,'w')
+		self.topology = topology
+		self.log("START: ")
+		self.log("We are rank %i" % rank )
+		self.rank = rank
+		self.log("Reading input file %s" % mappingFile)
+		self.mapping = dict()
+		with open(mappingFile, "r") as f:
+			for line in f:
+				#don't read silly comment lines
+				if line[0] == "#":
+					continue
+				splits = line.split(":")
+				rank = int(splits[0])
+				ip = splits[1]
+				port = int(splits[2]
+				self.mapping[rank] = ip, port
 
-if (len(sys.argv) == 1):
-	print "Please provide a port number as your first argument"
-	sys.exit(1)
+		self.log("Input file reading complete")
+		self.log("Starting network listen....")
 
-server = PsimWorker('127.0.0.1', int(sys.argv[1]))
+		self.create_socket(socket.AF_INET, socket.SOCK_STREAM)
+		selfInfo = self.mapping[self.rank]
+		self.log("Creating socket with info %s" % str(selfInfo)
+		self.connect( selfInfo )
+
+		self.log("START: done.\n")
+
+	def handle_close(self):
+		self.close()
+
+	def handle_read(self):
+		self.recv(8192)
+
+
 asyncore.loop()
+
