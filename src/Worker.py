@@ -22,3 +22,34 @@
 #ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
 #(INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
 #SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+import asyncore
+import socket
+
+class WorkHandler(asyncore.dispatcher_with_send):
+
+    def handle_read(self):
+        data = self.recv(8192)
+        if data:
+            self.send(data)
+
+class PsimWorker(asyncore.dispatcher):
+
+    def __init__(self, host, port):
+        asyncore.dispatcher.__init__(self)
+        self.create_socket(socket.AF_INET, socket.SOCK_STREAM)
+        self.set_reuse_addr()
+        self.bind((host, port))
+        self.listen(5)
+
+    def handle_accept(self):
+        pair = self.accept()
+        if pair is None:
+            pass
+        else:
+            sock, addr = pair
+            print 'Incoming connection from %s' % repr(addr)
+            handler = WorkHandler(sock)
+
+server = PsimWorker('localhost', 8080)
+asyncore.loop()
