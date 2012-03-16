@@ -23,43 +23,25 @@
 #(INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
 #SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-import asyncore
-import socket
 import sys
+from rpsim import RPSim
 
-class PsimWorker(asyncore.dispatcher):
+n = int(sys.argv[1])
+p = int(sys.argv[2])
+rank = int(sys.argv[3])
 
-	def __init__(self, host, port):
-		asyncore.dispatcher.__init__(self)
-		print "Creating new worker on port: ", port
-		self.port = port
-		
-		self.create_socket(socket.AF_INET, socket.SOCK_STREAM)
-		self.set_reuse_addr()
-		self.bind((host, port))
-		self.listen(5)
+comm = RPSim(p, rank)
 
-	def handle_accept(self):
-		pair = self.accept()
-		if pair is None:
-			pass
-		else:
-			sock, addr = pair
-			print 'Incoming connection from %s' % repr(addr)
-			self.rank = int(self.recv(4))
-			print 'I am rank: ', self.rank
+h,r = divmod(n,p)
+if r>0: h=h+1
+total = 0
+for i in range(h*comm.rank,min(h*comm.rank+h,n)):
+	total += i*i
 
-			programSize = int(self.recv(4))
-			print 'we have a program size of: ', programSize, ' bytes'
-			
-			self.program = self.recv(programSize)
-			print 'Program Received:'
-			print self.program
-	
+if comm.rank!=0:
+	comm.rpsend(0,total)
+else:
+	for k in range(1,p):
+		total += comm.rprecv(k)
+	print total
 
-if (len(sys.argv) == 1):
-	print "Please provide a port number as your first argument"
-	sys.exit(1)
-
-server = PsimWorker('127.0.0.1', int(sys.argv[1]))
-asyncore.loop()
