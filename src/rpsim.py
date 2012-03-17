@@ -27,7 +27,7 @@
 
 import os, string, cPickle, time, math
 import asyncore, socket
-
+import threading
 
 def SWITCH(i,j):
 	return True
@@ -35,19 +35,29 @@ def SWITCH(i,j):
 
 dataBuffer = list()
 
-class MessageHandler(asyncore.dispatcher_with_send):
+class AsyncCoreThread(threading.Thread):
+	def run(self):
+		asyncore.loop()
+
+class MessageHandler(asyncore.dispatcher):
 
 	def handle_read(self):
-		senderRank = self.recv(4)
-		print "sender rank = ", senderRank
 
-		dataSize = self.recv(4)
-		print "data length = ", dataSize
+		message = ""
+		while True:
+			data = self.recv(1024)
+			if data == "":
+				senderRank = inputData[0]
+				print "sender rank = ", senderRank
 
-		data = cPickle.load( self.recv(dataSize) )
-		print "data receied = ", data
+				data = cPickle.loads( inputData[1:] )
+				print "data receied = ", data
 
-		dataBuffer.append( (senderRank, data) )
+	   			 #put the data someone sent in a list to wait
+				dataBuffer.append( (senderRank, data) )			
+				return	
+			else:
+				message = message + data
 
 
 class RPSim(asyncore.dispatcher_with_send):
@@ -85,29 +95,19 @@ class RPSim(asyncore.dispatcher_with_send):
 		self.log("Input file reading complete")
 		self.log("Starting network listen....")
 
-		self.create_socket(socket.AF_INET, socket.SOCK_STREAM)
 		myInfo = self.mapping[self.rank]
 		self.log("Creating socket with info %s" % str(myInfo) )
-		self.connect( myInfo )
+		
+		self.create_socket(socket.AF_INET, socket.SOCK_STREAM)
+		self.set_reuse_addr()
+		self.bind( myInfo )
+		self.listen( 5 )
+
+		self.log("Starting new thread to handle ascync core loop")
+		t = AsyncCoreThread()
+		t.start()	
 
 		self.log("START: done.\n")
-
-	def handle_connect(self):
-		pass
-
-	def handle_close(self):
-		self.close()
-
-	def handle_read(self):
-		print self.recv(8192)
-
-	def writable(self):
-		return (len(self.buffer) > 0)
-
-   	def handle_write(self):
-		sent = self.send(self.buffer)
-		self.buffer = self.buffer[sent:]
-
 
 	#someone wants to give us data. stuff it off in our buffer
 	def handle_accept(self):
@@ -120,7 +120,7 @@ class RPSim(asyncore.dispatcher_with_send):
 			handler = MessageHandler(sock)
 
 
-	def _send(self,j,data):
+	def _rpsend(self,j,data):
 		"""
 		sends data to process #j
 		"""
@@ -128,28 +128,27 @@ class RPSim(asyncore.dispatcher_with_send):
 			self.log("process %i: send(%i,...) failed!\n" % (self.rank,j))
 			raise Exception
 		self.log("process %i: send(%i,%s) starting...\n" %  (self.rank,j,repr(data)))
-		s = cPickle.dumps(data)
 
 		self.log("Ok I want to send a message to rank %i" % j )
 		destination = self.mapping[j]
 
 		self.log("We are going to then send this message to %s" % repr( destination ) )
-		self.create_socket(socket.AF_INET, socket.SOCK_STREAM)
-		self.connect( destination )	
+		
+		s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+		s.connect( destination )	
 
-		#send my ran
+		self.log("Conenction a success!")
+
+		#TODO add some 0 prefixes
+		#send my rank
 		self.log( "sending my rank of %i " % self.rank )
-		self.send( str(self.rank) )
-
-		#send data length
-		self.log("sending data length of %i " % len( s ))
-		s = cPickle.dump(data)
-		self.send( str( len( s ) ) )		
+		s.send( str(self.rank) )
 
 		#send actual data	
 		self.log("sending actual data now" )
-		self.send( s )
+		s.send( cPickle.dumps(data) )
 
+		s.close()
 
 		self.log("process %i: send(%i,%s) success.\n" %  (self.rank,j,repr(data)))
 
@@ -157,31 +156,30 @@ class RPSim(asyncore.dispatcher_with_send):
 	def rpsend(self,j,data):
 		if not self.topology(self.rank,j):
 			raise RuntimeError, 'topology violation'
-		self._send(j,data)
+		self._rpsend(j,data)
 
-	def _recv(self,j):
+	def _rprecv(self,j):
 		"""
 		returns the data recvd from process #j
 		"""
-		if j<0 or j>=self.nprocs:
+		if j < 0 or j >= self.nprocs:
 			self.log("process %i: recv(%i) failed!\n" % (self.rank,j))
 			raise RuntimeError
 		self.log("process %i: recv(%i) starting...\n" % (self.rank,j))
-		
+	
 		while True:
+			asyncore.loop()
 			for rank, data in dataBuffer:
 				if rank == j:
 					self.log("process %i: recv(%i) done.\n" % (self.rank,j))
 					dataBuffer.remove(rank, data)
 					return data
-			#not found, sleep for a bit
-			time.sleep(1)
 
 	#we want to get data. loop until our buffer has data in it
 	def rprecv(self,j):
+		self.log("receive called for rank %i" % j )
 		if not self.topology(self.rank,j):
 			raise RuntimeError, 'topology violation'
-		return self._recv(j)
-
+		return self._rprecv(j)
 
 
