@@ -29,8 +29,29 @@ import os, string, cPickle, time, math
 import asyncore, socket
 import threading
 
+def BUS(i,j):
+	return True
+
 def SWITCH(i,j):
 	return True
+
+def MESH1(p):
+	return lambda i,j,p=p: (i-j)**2==1
+
+def TORUS1(p):
+	return lambda i,j,p=p: (i-j+p)%p==1 or (j-i+p)%p==1
+
+def MESH2(p):
+	q=int(math.sqrt(p)+0.1)
+	return lambda i,j,q=q: ((i%q-j%q)**2,(i/q-j/q)**2) in [(1,0),(0,1)]
+
+def TORUS2(p):
+	q=int(math.sqrt(p)+0.1)
+	return lambda i,j,q=q: ((i%q-j%q+q)%q,(i/q-j/q+q)%q) in [(0,1),(1,0)] or \
+	                       ((j%q-i%q+q)%q,(j/q-i/q+q)%q) in [(0,1),(1,0)]
+def TREE(i,j):
+	return i==int((j-1)/2) or j==int((i-1)/2)
+
 
 
 dataBuffer = list()
@@ -46,12 +67,14 @@ class MessageHandler(asyncore.dispatcher):
 		message = ""
 		while True:
 			data = self.recv(1024)
-			if data == "":
-				senderRank = inputData[0]
-				print "sender rank = ", senderRank
+			self.log("Data Received :%s:" %data)
 
-				data = cPickle.loads( inputData[1:] )
-				print "data receied = ", data
+			if data == "":
+				senderRank = int( message[0] )
+				self.log( "sender rank = %i " % senderRank )
+
+				data = cPickle.loads( message[1:] )
+				self.log( "data receied = %s " % data )
 
 	   			 #put the data someone sent in a list to wait
 				dataBuffer.append( (senderRank, data) )			
@@ -168,11 +191,10 @@ class RPSim(asyncore.dispatcher_with_send):
 		self.log("process %i: recv(%i) starting...\n" % (self.rank,j))
 	
 		while True:
-			asyncore.loop()
 			for rank, data in dataBuffer:
 				if rank == j:
 					self.log("process %i: recv(%i) done.\n" % (self.rank,j))
-					dataBuffer.remove(rank, data)
+					dataBuffer.remove( (rank, data) )
 					return data
 
 	#we want to get data. loop until our buffer has data in it
@@ -181,5 +203,92 @@ class RPSim(asyncore.dispatcher_with_send):
 		if not self.topology(self.rank,j):
 			raise RuntimeError, 'topology violation'
 		return self._rprecv(j)
+
+
+	def one2all_broadcast(self, source, value):
+	    self.log("process %i: BEGIN one2all_broadcast(%i,%s)\n" % \
+	             (self.rank,source, repr(value)))
+	    if self.rank==source:
+	        for i in range(0, self.nprocs):
+	            if i!=source:
+	                self._send(i,value)
+	    else:
+	        value=self._recv(source)
+	    self.log("process %i: END one2all_broadcast(%i,%s)\n" % \
+	             (self.rank,source, repr(value)))
+	    return value
+
+	def all2all_broadcast(self, value):
+	    self.log("process %i: BEGIN all2all_broadcast(%s)\n" % \
+	             (self.rank, repr(value)))
+	    vector=self.all2one_collect(0,value)
+	    vector=self.one2all_broadcast(0,vector)
+	    self.log("process %i: END all2all_broadcast(%s)\n" % \
+	             (self.rank, repr(value)))
+	    return vector
+
+	def one2all_scatter(self,source,data):
+	    self.log('process %i: BEGIN all2one_scatter(%i,%s)\n' % \
+	             (self.rank,source,repr(data)))
+	    if self.rank==source:
+	         h, reminder = divmod(len(data),self.nprocs)
+	         if reminder: h+=1
+	         for i in range(self.nprocs):
+	             self._send(i,data[i*h:i*h+h])
+	    vector = self._recv(source)
+	    self.log('process %i: END all2one_scatter(%i,%s)\n' % \
+	             (self.rank,source,repr(data)))
+	    return vector
+
+
+	def all2one_collect(self,destination,data):
+	    self.log("process %i: BEGIN all2one_collect(%i,%s)\n" % \
+	             (self.rank,destination,repr(data)))
+	    self._send(destination,data)
+	    if self.rank==destination:
+	        vector = [self._recv(i) for i in range(self.nprocs)]
+	    else:
+	        vector = []
+	    self.log("process %i: END all2one_collect(%i,%s)\n" % \
+	             (self.rank,destination,repr(data)))
+	    return vector
+
+	def all2one_reduce(self,destination,value,op=lambda a,b:a+b):
+	    self.log("process %i: BEGIN all2one_reduce(%s)\n" % \
+	             (self.rank,repr(value)))
+	    self._send(destination,value)
+	    if self.rank==destination:
+	        result = reduce(op,[self._recv(i) for i in range(self.nprocs)])
+	    else:
+	        result = None
+	    self.log("process %i: END all2one_reduce(%s)\n" % \
+	             (self.rank,repr(value)))
+	    return result
+
+	def all2all_reduce(self,value,op=lambda a,b:a+b):
+	    self.log("process %i: BEGIN all2all_reduce(%s)\n" % \
+	             (self.rank,repr(value)))
+	    result=self.all2one_reduce(0,value,op)
+	    result=self.one2all_broadcast(0,result)
+	    self.log("process %i: END all2all_reduce(%s)\n" % \
+	             (self.rank,repr(value)))
+	    return result
+
+	    @staticmethod
+	    def sum(x,y): return x+y
+	    @staticmethod
+	    def mul(x,y): return x*y
+	    @staticmethod
+	    def max(x,y): return max(x,y)
+	    @staticmethod
+	    def min(x,y): return min(x,y)
+
+	def barrier(self):
+	    self.log("process %i: BEGIN barrier()\n" % (self.rank))
+	    self.all2all_broadcast(0)
+	    self.log("process %i: END barrier()\n" % (self.rank))
+	    return
+
+
 
 

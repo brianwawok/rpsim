@@ -22,3 +22,15 @@ LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND
 ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
 (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
 SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+Files:
+  rpsim: This is the actual remote pSim where we want to include
+  sump: Example parallel program.
+
+How to use example:
+	python sump.py 10 2 0 &
+	python sump.py 10 2 1 &
+
+
+
+
